@@ -1,0 +1,5 @@
+train: D:\Tugas Kuliah\Bengkel Koding\Proyek Virtual Assistance\Copied Dataset
+val: D:\Tugas Kuliah\Bengkel Koding\Proyek Virtual Assistance\Copied Dataset  # atau gunakan folder validasi terpisah jika ada
+
+nc: 8  # jumlah kelas
+names: ['Arif', 'Bambang', 'Fernando', 'Luki', 'Naufal', 'Radhit', 'Timotius', 'Yudha']
