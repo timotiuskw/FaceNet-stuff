@@ -10,13 +10,13 @@ import time
 
 # Load YOLOv8-face model and move to GPU if available
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
-model = YOLO('D:\Tugas Kuliah\Bengkel Koding\Proyek VA venv\pythonkuenv\yolov8n-face.pt').to(device)
+model = YOLO('D:\\Tugas Kuliah\\Bengkel Koding\\Proyek VA venv\\pythonkuenv\\yolov8n-face.pt').to(device)
 
 # Load FaceNet model and move to GPU
 facenet_model = InceptionResnetV1(pretrained='vggface2').eval().to(device)
 
 # Load the saved embeddings from the .pkl file
-with open('D:\Tugas Kuliah\Bengkel Koding\Proyek VA venv\pythonkuenv\embeddings.pkl', 'rb') as f:
+with open('embeddings.pkl', 'rb') as f:
     embeddings_db = pickle.load(f)
 
 # Function to crop face using YOLOv8-face
@@ -56,88 +56,74 @@ def match_face(embedding, threshold=0.6):
 
     return best_match, best_similarity
 
-# Initialize variables to store detections and time tracking
-last_detections = []  # To store bounding boxes, names
-entry_times = {}  # Store entry time when someone is first detected
-total_time_in_frame = {}  # Store total time for each person
-last_seen = {}  # Store the last time the person was seen
-max_frame_without_detection = 30  # Tolerate up to 30 frames without detection
+# Variables for logging real-time performance
+inference_times = []
+average_similarities = []  # Log average cosine similarity per frame
 
 # Open webcam using OpenCV
 cap = cv2.VideoCapture(0)
-framecount = 0
 
 while True:
-    framecount += 1
     ret, frame = cap.read()
     if not ret:
         break
 
-    if framecount % 30 == 0:
-        # Detect faces in the frame
-        results = model(frame)
-        
-        current_frame_names = []  # Track names detected in the current frame
+    # Start measuring inference time
+    start_inference = time.time()
 
-        if len(results[0].boxes) > 0:
-            last_detections = []  # Clear previous detections
-            for result in results:
-                for box in result.boxes.xyxy:
-                    # Crop face based on bounding box
-                    cropped_face = crop_face(frame, box)
+    # Detect faces in the frame
+    results = model(frame)
+    current_frame_names = []  # Track names detected in the current frame
+    frame_similarities = []  # Track similarities for the current frame
 
-                    # Extract embedding for the cropped face
-                    embedding = extract_embedding(cropped_face)
+    if len(results[0].boxes) > 0:
+        for result in results:
+            for box in result.boxes.xyxy:
+                # Crop face based on bounding box
+                cropped_face = crop_face(frame, box)
 
-                    # Match the embedding with the saved database
-                    name, similarity = match_face(embedding)
-                    
-                    # Store the detection (bounding box, name, and similarity)
-                    last_detections.append((box, name, similarity))
-                    current_frame_names.append(name)
+                # Extract embedding for the cropped face
+                embedding = extract_embedding(cropped_face)
 
-                    # Record entry time if the person is detected for the first time
-                    if name != "Unknown":
-                        if name not in entry_times:
-                            entry_times[name] = time.time()  # First time detected
-                            total_time_in_frame[name] = 0  # Initialize total time
-                        elif name in last_seen:  # Person was seen before
-                            # Update total time by adding time since last seen
-                            total_time_in_frame[name] += time.time() - last_seen[name]
+                # Match the embedding with the saved database
+                name, similarity = match_face(embedding)
 
-                        # Update last seen time to current time
-                        last_seen[name] = time.time()
+                # Store similarity for calculating average similarity
+                frame_similarities.append(similarity)
 
-    # Check for people who were not detected in the current frame
-    for name in list(last_seen.keys()):
-        if name not in current_frame_names:
-            # Update total time for those who were not seen in this frame
-            total_time_in_frame[name] += time.time() - last_seen[name]
-            del last_seen[name]  # Remove from last_seen since they are no longer in the frame
+                # Draw bounding box and name on the frame
+                x1, y1, x2, y2 = map(int, box)
+                color = (0, 255, 0) if name != "Unknown" else (0, 0, 255)
+                cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+                cv2.putText(frame, f"{name}: {similarity:.2f}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
 
-    # Display last detected faces with their respective total time in frame and similarity
-    if len(last_detections) > 0:
-        for detection in last_detections:
-            box, name, similarity = detection
-            x1, y1, x2, y2 = map(int, box)
-            
-            
-            # Display name and similarity in the bounding box
-            if name != "Unknown" and similarity > 0.7:
-                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                total_time = int(total_time_in_frame.get(name, 0))
-                similarity_text = f"{name}: {similarity:.2f}"  # Display name and similarity score
-                cv2.putText(frame, similarity_text, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-                cv2.putText(frame, f"Time: {total_time}s", (x1, y2 + 20), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
+    # Calculate average similarity for the frame
+    if frame_similarities:
+        avg_similarity = sum(frame_similarities) / len(frame_similarities)
+        average_similarities.append(avg_similarity)  # Log average similarity for statistics
+        cv2.putText(frame, f"Avg Similarity: {avg_similarity:.2f}", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
 
+    # Calculate and display FPS
+    elapsed_time = time.time() - start_inference
+    inference_times.append(elapsed_time)  # Log inference time
+    fps = 1 / elapsed_time if elapsed_time > 0 else 0
+    cv2.putText(frame, f"FPS: {fps:.2f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
 
-    # Show the result in real-time
+    # Display frame
     cv2.imshow('Face Recognition', frame)
 
-    # Press 'q' to exit
+    # Exit on 'q' key press
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
 
-# Release the webcam and close all OpenCV windows
+# Calculate and print statistics after the loop
+average_inference_time = sum(inference_times) / len(inference_times) if inference_times else 0
+average_similarity_overall = sum(average_similarities) / len(average_similarities) if average_similarities else 0
+
+print(f"Average Inference Time: {average_inference_time:.4f} seconds")
+print(f"Average FPS: {1 / average_inference_time:.2f}" if average_inference_time > 0 else "Average FPS: 0")
+print(f"Average Cosine Similarity: {average_similarity_overall:.2f}")
+
+# Release webcam and close all OpenCV windows
 cap.release()
 cv2.destroyAllWindows()
