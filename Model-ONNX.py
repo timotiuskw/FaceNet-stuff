@@ -83,9 +83,12 @@ def extract_embedding(face_image):
 def save_embeddings(dataset_folder, output_file='embeddings.pkl'):
     start_time = time.time()  # Catat waktu mulai
     embeddings_db = {}
-    for image_file in os.listdir(dataset_folder):
+    image_files = os.listdir(dataset_folder)
+    total_files = len(image_files)
+    for idx, image_file in enumerate(image_files):
         image_path = os.path.join(dataset_folder, image_file)
         if os.path.isfile(image_path):
+            print(f"Processing {idx + 1}/{total_files}: {image_file}")
             person_name = os.path.splitext(image_file)[0]  # Nama orang diambil dari nama file tanpa ekstensi
             cropped_face = crop_face(image_path)
             if cropped_face is not None:  # Pastikan wajah berhasil dipotong
