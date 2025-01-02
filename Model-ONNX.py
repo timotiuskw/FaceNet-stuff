@@ -2,31 +2,39 @@ import os
 import pickle
 import numpy as np
 from PIL import Image
-import torch
 import cv2
-from facenet_pytorch import InceptionResnetV1
 from yolov8 import YOLOv8
 import time
-import pillow_heif
+import onnxruntime
 
 # Load YOLOv8-face ONNX model
 model_path = "D:/Tugas Kuliah/Bengkel Koding/Proyek VA venv/pythonkuenv/yolov8n-face.onnx"
 yolov8_detector = YOLOv8(model_path, conf_thres=0.6, iou_thres=0.6)
 
+try:
+    import pillow_heif
+    heif_supported = True
+except ImportError:
+    heif_supported = False
+    print("Warning: pillow_heif module is not installed. HEIC files will not be supported.")
+
 # Fungsi untuk memuat gambar (HEIC atau format lain)
 def load_image(image_path):
     if image_path.lower().endswith(".heic"):
-        heif_file = pillow_heif.read_heif(image_path)
-        image = Image.frombytes(
-            heif_file.mode,
-            heif_file.size,
-            heif_file.data,
-            "raw",
-            heif_file.mode
-        )
-        # Konversi gambar ke format OpenCV (BGR)
-        image = np.array(image)
-        return cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+        if heif_supported:
+            heif_file = pillow_heif.read_heif(image_path)
+            image = Image.frombytes(
+                heif_file.mode,
+                heif_file.size,
+                heif_file.data,
+                "raw",
+                heif_file.mode
+            )
+            # Konversi gambar ke format OpenCV (BGR)
+            image = np.array(image)
+            return cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+        else:
+            raise ValueError("HEIC format is not supported because pillow_heif is not installed.")
     else:
         return cv2.imread(image_path)
 
@@ -51,20 +59,23 @@ def crop_face(image_path):
     print(f"No faces detected in image: {image_path}")
     return None
 
-# Load FaceNet model
-facenet_model = InceptionResnetV1(pretrained='vggface2').eval()
+# Load FaceNet ONNX model for face recognition
+facenet_session = onnxruntime.InferenceSession('D:/Tugas Kuliah/Bengkel Koding/Proyek VA venv/pythonkuenv/facenet_model.onnx')
 
 # Fungsi untuk mengekstrak embedding dari gambar wajah
 def extract_embedding(face_image):
-    img = Image.fromarray(face_image)
-    img = img.resize((160, 160))  # FaceNet membutuhkan input ukuran 160x160
-    img = np.array(img).astype(np.float32)
-    img = (img - 127.5) / 128.0  # Normalisasi untuk FaceNet
+    def preprocess_face(face_image):
+        img = Image.fromarray(face_image)
+        img = img.resize((160, 160))  # FaceNet membutuhkan input ukuran 160x160
+        img = np.array(img).astype(np.float32)
+        img = (img - 127.5) / 128.0  # Normalisasi untuk FaceNet
+        img = np.transpose(img, (2, 0, 1))  # Ubah ke format NCHW
+        return np.expand_dims(img, axis=0).astype(np.float32)
 
-    img_tensor = torch.tensor(img).permute(2, 0, 1).unsqueeze(0)  # Ubah ke tensor
+    preprocessed_face = preprocess_face(face_image)
 
-    with torch.no_grad():
-        embedding = facenet_model(img_tensor).numpy().flatten()
+    # Run the ONNX model to extract embeddings
+    embedding = facenet_session.run(None, {'input': preprocessed_face})[0].flatten()
 
     return embedding
 
