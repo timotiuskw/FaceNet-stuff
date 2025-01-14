@@ -93,48 +93,44 @@ prev_time = time.time()
 fps_array = []
 inference_times = []
 similarities = []
+
 time_window_start = time.time()
 
 while True:
-    framecount += 1
     ret, frame = cap.read()
     if not ret:
         break
 
     # Start timing preprocess
     start_time = time.time()
-    
+
     # Detect faces in the frame using YOLOv8-face (kodingan pertama)
-    preprocess_time = time.time() - start_time
-
-    # Start timing inference
-    start_time = time.time()
     boxes, scores, class_ids = yolov8_detector(frame)
-    inference_time = time.time() - start_time
-    
-    # Save inference time for average calculation
+
+    # Start timing inference for FaceNet
+    start_inference_time = time.time()
+
+    # Process and extract embedding from cropped face
+    for box in boxes:
+        cropped_face = crop_face(frame, box)
+        embedding = extract_embedding(cropped_face)
+        name, similarity = match_face(embedding)
+        predicted_emotion = predict_emotion(cropped_face)
+        emotion_text = class_to_emotion(predicted_emotion)
+
+        # Save cosine similarity for average calculation
+        if similarity is not None:
+            similarities.append(similarity)
+
+        x1, y1, x2, y2 = map(int, box)
+        if name != "Unknown" and similarity > 0.7:
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            similarity_text = f"{name}: {similarity:.2f}, Emotion: {emotion_text}"
+            cv2.putText(frame, similarity_text, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+
+    # Calculate inference time for FaceNet
+    inference_time = time.time() - start_inference_time
     inference_times.append(inference_time * 1000)  # Convert to ms
-
-    # Start timing postprocess
-    start_time = time.time()
-    if len(boxes) > 0:
-        for box in boxes:
-            cropped_face = crop_face(frame, box)
-            embedding = extract_embedding(cropped_face)
-            name, similarity = match_face(embedding)
-            predicted_emotion = predict_emotion(cropped_face)
-            emotion_text = class_to_emotion(predicted_emotion)
-
-            # Save cosine similarity for average calculation
-            if similarity is not None:
-                similarities.append(similarity)
-
-            x1, y1, x2, y2 = map(int, box)
-            if name != "Unknown" and similarity > 0.7:
-                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                similarity_text = f"{name}: {similarity:.2f}, Emotion: {emotion_text}"
-                cv2.putText(frame, similarity_text, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-    postprocess_time = time.time() - start_time
 
     # Calculate FPS
     current_time = time.time()
@@ -145,31 +141,26 @@ while True:
     # Display FPS on the top left of the frame
     cv2.putText(frame, f"FPS: {fps:.2f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
 
-    # Display timing information on console, showing number of faces detected
-    num_faces = len(boxes)  # Count the number of faces detected
-    print(f"0: 640x480 {num_faces} face(s), Preprocess: {preprocess_time*1000:.1f}ms, Inference: {inference_time*1000:.1f}ms, Postprocess: {postprocess_time*1000:.1f}ms per image at shape (1, 3, 640, 480)")
-
     # Show the result in real-time
     cv2.imshow('Face Recognition (YOLOv8 + FaceNet ONNX + Emotion Detection)', frame)
 
-    # Calculate averages every 10 seconds
-    if current_time - time_window_start >= 10:
+    # Press 'q' to exit and print the averages and the arrays
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        # Calculate averages
         avg_fps = sum(fps_array) / len(fps_array) if fps_array else 0
         avg_inference_time = sum(inference_times) / len(inference_times) if inference_times else 0
         avg_similarity = sum(similarities) / len(similarities) if similarities else 0
 
-        print(f"Average FPS (10s): {fps_array[:10]}")
-        print(f"Average Inference Time (10s): {inference_times[:10]}")
-        print(f"Average Cosine Similarity (10s): {similarities[:10]}")
+        # Print average values
+        print(f"Average FPS: {avg_fps:.2f}")
+        print(f"Average Inference Time (FaceNet): {avg_inference_time:.2f} ms")
+        print(f"Average Cosine Similarity: {avg_similarity:.2f}")
+        
+        # Print the arrays
+        print("\nFPS Array:", fps_array)
+        print("Inference Times Array:", inference_times)
+        print("Cosine Similarity Array:", similarities)
 
-        # Reset metrics for the next 10-second window
-        fps_array = fps_array[10:]  # Simpan sisa data jika lebih dari 10
-        inference_times = inference_times[10:]
-        similarities = similarities[10:]
-        time_window_start = current_time
-
-    # Press 'q' to exit
-    if cv2.waitKey(1) & 0xFF == ord('q'):
         break
 
 # Release the webcam and close all OpenCV windows
